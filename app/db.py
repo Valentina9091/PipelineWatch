@@ -22,6 +22,12 @@ def get_conn():
         conn.close()
 
 
+def _ensure_column(conn, column_name: str, definition: str) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    if column_name not in columns:
+        conn.execute(f"ALTER TABLE jobs ADD COLUMN {column_name} {definition}")
+
+
 def init_db():
     with get_conn() as conn:
         conn.execute(
@@ -34,11 +40,15 @@ def init_db():
                 retry_count INTEGER NOT NULL DEFAULT 0,
                 max_retries INTEGER NOT NULL DEFAULT 3,
                 error_message TEXT,
+                queue_message_id TEXT,
+                receive_count INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
             """
         )
+        _ensure_column(conn, "queue_message_id", "TEXT")
+        _ensure_column(conn, "receive_count", "INTEGER NOT NULL DEFAULT 0")
 
 
 def row_to_dict(row):

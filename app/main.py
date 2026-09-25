@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
+
 from .db import init_db
 from .models import JobCreate, JobResponse, ProcessRequest
-from . import service
+from .config import get_settings
+from . import queue, service
 
 
 @asynccontextmanager
@@ -13,20 +15,40 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="PipelineWatch",
-    version="0.1.0",
-    description="Cloud-ready observability API for data pipeline jobs, retries, failures, and DLQ events.",
+    version="0.2.0",
+    description="Pipeline observability API with AWS SQS retries and dead-letter queue support.",
     lifespan=lifespan,
 )
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "pipelinewatch"}
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "service": "pipelinewatch",
+        "version": "0.2.0",
+        "sqs_enabled": settings.queue_enabled,
+    }
 
 
 @app.post("/jobs", response_model=JobResponse, status_code=201)
 def create_job(job: JobCreate):
-    return service.create_job(job.pipeline_name, job.payload, job.max_retries)
+    created = service.create_job(job.pipeline_name, job.payload, job.max_retries)
+    settings = get_settings()
+
+    if settings.queue_enabled:
+        try:
+            message_id = queue.publish_job(created)
+            created = service.mark_enqueued(created["id"], message_id)
+        except Exception as exc:
+            service.mark_enqueue_failed(created["id"], f"SQS enqueue failed: {exc}")
+            raise HTTPException(
+                status_code=503,
+                detail={"message": "Job saved but could not be queued", "job_id": created["id"]},
+            ) from exc
+
+    return created
 
 
 @app.get("/jobs", response_model=list[JobResponse])
@@ -55,9 +77,26 @@ def retry_job(job_id: int):
     job = service.retry_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    settings = get_settings()
+    if settings.queue_enabled and job["status"] == "queued":
+        try:
+            message_id = queue.publish_job(job)
+            job = service.mark_enqueued(job_id, message_id)
+        except Exception as exc:
+            service.mark_enqueue_failed(job_id, f"SQS requeue failed: {exc}")
+            raise HTTPException(status_code=503, detail="Job could not be requeued") from exc
     return job
 
 
 @app.get("/metrics")
 def metrics():
     return service.get_metrics()
+
+
+@app.get("/queue/metrics")
+def queue_metrics():
+    try:
+        return queue.get_queue_metrics()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc

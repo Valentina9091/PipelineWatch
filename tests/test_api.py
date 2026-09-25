@@ -47,3 +47,12 @@ def test_metrics():
         metrics = client.get("/metrics")
         assert metrics.status_code == 200
         assert metrics.json()["total_jobs"] == 1
+
+
+def test_health_reports_sqs_disabled(monkeypatch):
+    monkeypatch.delenv("PIPELINE_QUEUE_URL", raising=False)
+    with TestClient(app) as client:
+        response = client.get("/health")
+        assert response.status_code == 200
+        assert response.json()["version"] == "0.2.0"
+        assert response.json()["sqs_enabled"] is False

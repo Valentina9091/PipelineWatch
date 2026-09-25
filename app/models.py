@@ -26,6 +26,8 @@ class JobResponse(BaseModel):
     retry_count: int
     max_retries: int
     error_message: Optional[str] = None
+    queue_message_id: Optional[str] = None
+    receive_count: int = 0
     created_at: datetime
     updated_at: datetime
 
