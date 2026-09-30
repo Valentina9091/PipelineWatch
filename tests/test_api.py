@@ -1,12 +1,16 @@
 from fastapi.testclient import TestClient
+
 from app.main import app
-from app.db import DB_PATH, init_db
+from app.db import DB_PATH
+from app.store import reset_store_cache
+from app import service
 
 
 def setup_function():
     if DB_PATH.exists():
         DB_PATH.unlink()
-    init_db()
+    reset_store_cache()
+    service.initialize()
 
 
 def test_job_success_flow():
@@ -14,9 +18,10 @@ def test_job_success_flow():
         created = client.post("/jobs", json={
             "pipeline_name": "orders",
             "payload": {"order_id": 123},
-            "max_retries": 2
+            "max_retries": 2,
         })
         assert created.status_code == 201
+        assert created.json()["correlation_id"]
         job_id = created.json()["id"]
 
         processed = client.post(f"/jobs/{job_id}/process", json={"should_fail": False})
@@ -29,7 +34,7 @@ def test_job_moves_to_dlq_after_retry_limit():
         created = client.post("/jobs", json={
             "pipeline_name": "payments",
             "payload": {"payment_id": "p-1"},
-            "max_retries": 1
+            "max_retries": 1,
         })
         job_id = created.json()["id"]
 
@@ -49,10 +54,14 @@ def test_metrics():
         assert metrics.json()["total_jobs"] == 1
 
 
-def test_health_reports_sqs_disabled(monkeypatch):
+def test_health_reports_local_mode(monkeypatch):
     monkeypatch.delenv("PIPELINE_QUEUE_URL", raising=False)
+    monkeypatch.delenv("DYNAMODB_TABLE", raising=False)
+    monkeypatch.setenv("JOB_STORE", "sqlite")
+    reset_store_cache()
     with TestClient(app) as client:
         response = client.get("/health")
         assert response.status_code == 200
-        assert response.json()["version"] == "0.2.0"
+        assert response.json()["version"] == "0.3.0"
+        assert response.json()["job_store"] == "sqlite"
         assert response.json()["sqs_enabled"] is False

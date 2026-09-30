@@ -1,13 +1,10 @@
 import argparse
 import json
-import logging
 import time
 
 from .config import get_settings
+from .logging_utils import log_event
 from . import queue, service
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger("pipelinewatch.dlq")
 
 
 def sync_once(wait_time: int = 1) -> int:
@@ -19,12 +16,12 @@ def sync_once(wait_time: int = 1) -> int:
     for message in messages:
         try:
             body = json.loads(message["Body"])
-            job_id = int(body["job_id"])
-            service.mark_dlq(job_id, "SQS moved the message to the dead-letter queue")
-            logger.warning("job=%s observed in DLQ", job_id)
-            # Do not delete: the DLQ remains an auditable/replayable failure store.
-        except Exception:
-            logger.exception("could not synchronize DLQ message")
+            job_id = str(body["job_id"])
+            service.mark_dlq(job_id, "Observed in the SQS dead-letter queue")
+            log_event("warning", "dlq_observed", job_id=job_id, correlation_id=body.get("correlation_id", job_id))
+            # Deliberately do not delete: preserve the DLQ message for inspection/replay.
+        except Exception as exc:
+            log_event("exception", "dlq_sync_error", error=str(exc))
     return len(messages)
 
 
@@ -38,7 +35,7 @@ def main():
         sync_once(args.wait_time)
         return
 
-    logger.info("starting PipelineWatch DLQ synchronizer")
+    log_event("info", "dlq_sync_started")
     while True:
         sync_once(args.wait_time)
         time.sleep(5)

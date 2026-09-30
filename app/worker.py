@@ -1,34 +1,39 @@
 import argparse
 import json
-import logging
 import time
 
 from .config import get_settings
+from .logging_utils import log_event
 from . import queue, service
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger("pipelinewatch.worker")
 
 
 def process_message(message: dict) -> bool:
     settings = get_settings()
     body = json.loads(message["Body"])
-    job_id = int(body["job_id"])
+    job_id = str(body["job_id"])
     payload = body.get("payload", {})
+    correlation_id = body.get("correlation_id", job_id)
     receive_count = int(message.get("Attributes", {}).get("ApproximateReceiveCount", "1"))
 
     service.mark_processing(job_id, receive_count)
 
-    # Demo failure switch. In a real worker this block would call the actual pipeline task.
     if payload.get("force_fail") is True:
         error = "Worker failure requested by payload.force_fail"
-        service.mark_worker_failure(job_id, receive_count, error)
-        logger.warning("job=%s failed receive_count=%s; message left on SQS", job_id, receive_count)
+        move_to_dlq = receive_count >= settings.max_receive_count
+        service.mark_worker_failure(job_id, receive_count, error, move_to_dlq=move_to_dlq)
+        log_event(
+            "warning",
+            "job_failed",
+            job_id=job_id,
+            correlation_id=correlation_id,
+            receive_count=receive_count,
+            dlq_expected=move_to_dlq,
+        )
         return False
 
     service.mark_succeeded(job_id, receive_count)
     queue.delete_message(settings.sqs_queue_url, message["ReceiptHandle"])
-    logger.info("job=%s succeeded and message deleted", job_id)
+    log_event("info", "job_succeeded", job_id=job_id, correlation_id=correlation_id, receive_count=receive_count)
     return True
 
 
@@ -41,8 +46,8 @@ def poll_once(wait_time: int = 20) -> int:
     for message in messages:
         try:
             process_message(message)
-        except Exception:
-            logger.exception("unexpected worker error; message will become visible again")
+        except Exception as exc:
+            log_event("exception", "worker_error", error=str(exc))
     return len(messages)
 
 
@@ -56,7 +61,7 @@ def main():
         poll_once(args.wait_time)
         return
 
-    logger.info("starting PipelineWatch worker")
+    log_event("info", "worker_started")
     while True:
         poll_once(args.wait_time)
         time.sleep(0.2)

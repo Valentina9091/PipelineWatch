@@ -13,3 +13,19 @@ output "pipeline_dlq_url" {
 output "pipeline_dlq_arn" {
   value = aws_sqs_queue.pipeline_dlq.arn
 }
+
+output "dynamodb_table_name" {
+  value = aws_dynamodb_table.jobs.name
+}
+
+output "lambda_function_name" {
+  value = aws_lambda_function.worker.function_name
+}
+
+output "cloudwatch_dashboard" {
+  value = aws_cloudwatch_dashboard.pipelinewatch.dashboard_name
+}
+
+output "alarm_topic_arn" {
+  value = aws_sns_topic.alarms.arn
+}

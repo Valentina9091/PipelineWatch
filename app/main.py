@@ -1,22 +1,25 @@
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Query
 
-from .db import init_db
 from .models import JobCreate, JobResponse, ProcessRequest
 from .config import get_settings
+from .logging_utils import log_event
 from . import queue, service
+
+VERSION = "0.3.0"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    service.initialize()
     yield
 
 
 app = FastAPI(
     title="PipelineWatch",
-    version="0.2.0",
-    description="Pipeline observability API with AWS SQS retries and dead-letter queue support.",
+    version=VERSION,
+    description="Cloud-native pipeline observability API with SQS, Lambda, DynamoDB, CloudWatch, and DLQ recovery.",
     lifespan=lifespan,
 )
 
@@ -27,8 +30,10 @@ def health():
     return {
         "status": "ok",
         "service": "pipelinewatch",
-        "version": "0.2.0",
+        "version": VERSION,
+        "job_store": settings.job_store,
         "sqs_enabled": settings.queue_enabled,
+        "dynamodb_enabled": settings.dynamodb_enabled,
     }
 
 
@@ -48,6 +53,14 @@ def create_job(job: JobCreate):
                 detail={"message": "Job saved but could not be queued", "job_id": created["id"]},
             ) from exc
 
+    log_event(
+        "info",
+        "job_created",
+        job_id=created["id"],
+        correlation_id=created["correlation_id"],
+        pipeline_name=created["pipeline_name"],
+        queued=settings.queue_enabled,
+    )
     return created
 
 
@@ -57,7 +70,7 @@ def list_jobs(status: str | None = None, limit: int = Query(default=50, ge=1, le
 
 
 @app.get("/jobs/{job_id}", response_model=JobResponse)
-def get_job(job_id: int):
+def get_job(job_id: str):
     job = service.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -65,7 +78,7 @@ def get_job(job_id: int):
 
 
 @app.post("/jobs/{job_id}/process", response_model=JobResponse)
-def process_job(job_id: int, request: ProcessRequest):
+def process_job(job_id: str, request: ProcessRequest):
     job = service.process_job(job_id, request.should_fail, request.error_message)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -73,7 +86,7 @@ def process_job(job_id: int, request: ProcessRequest):
 
 
 @app.post("/jobs/{job_id}/retry", response_model=JobResponse)
-def retry_job(job_id: int):
+def retry_job(job_id: str):
     job = service.retry_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")

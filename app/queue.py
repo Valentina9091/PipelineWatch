@@ -20,15 +20,19 @@ def publish_job(job: dict) -> str:
         raise RuntimeError("PIPELINE_QUEUE_URL is not configured")
 
     body = {
-        "job_id": job["id"],
+        "job_id": str(job["id"]),
         "pipeline_name": job["pipeline_name"],
         "payload": job["payload"],
-        "max_retries": job["max_retries"],
+        "max_retries": int(job["max_retries"]),
+        "correlation_id": job["correlation_id"],
         "created_at": str(job["created_at"]),
     }
     response = _client().send_message(
         QueueUrl=settings.sqs_queue_url,
         MessageBody=json.dumps(body),
+        MessageAttributes={
+            "CorrelationId": {"DataType": "String", "StringValue": job["correlation_id"]},
+        },
     )
     return response["MessageId"]
 
@@ -39,6 +43,7 @@ def receive_messages(queue_url: str, max_messages: int = 10, wait_time: int = 20
         MaxNumberOfMessages=max_messages,
         WaitTimeSeconds=wait_time,
         MessageSystemAttributeNames=["ApproximateReceiveCount"],
+        MessageAttributeNames=["All"],
     )
     return response.get("Messages", [])
 
@@ -69,8 +74,5 @@ def get_queue_metrics() -> dict:
         raise RuntimeError("PIPELINE_QUEUE_URL is not configured")
 
     metrics = {"source_queue": queue_depth(settings.sqs_queue_url)}
-    if settings.sqs_dlq_url:
-        metrics["dead_letter_queue"] = queue_depth(settings.sqs_dlq_url)
-    else:
-        metrics["dead_letter_queue"] = None
+    metrics["dead_letter_queue"] = queue_depth(settings.sqs_dlq_url) if settings.sqs_dlq_url else None
     return metrics

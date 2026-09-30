@@ -1,7 +1,8 @@
-from enum import Enum
-from pydantic import BaseModel, Field
 from datetime import datetime
+from enum import Enum
 from typing import Optional
+
+from pydantic import BaseModel, Field
 
 
 class JobStatus(str, Enum):
@@ -19,7 +20,7 @@ class JobCreate(BaseModel):
 
 
 class JobResponse(BaseModel):
-    id: int
+    id: str
     pipeline_name: str
     payload: dict
     status: JobStatus
@@ -28,6 +29,7 @@ class JobResponse(BaseModel):
     error_message: Optional[str] = None
     queue_message_id: Optional[str] = None
     receive_count: int = 0
+    correlation_id: str
     created_at: datetime
     updated_at: datetime
 

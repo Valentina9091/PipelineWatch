@@ -1,0 +1,30 @@
+digraph PipelineWatch {
+  graph [rankdir=TB, bgcolor="white", pad="0.35", nodesep="0.45", ranksep="0.6", splines=ortho];
+  node [shape=box, style="rounded", fontname="Helvetica", fontsize=11, margin="0.18,0.12"];
+  edge [fontname="Helvetica", fontsize=9];
+
+  client [label="Client / Swagger"];
+  api [label="FastAPI API\ncreate + query jobs"];
+  sqs [label="Amazon SQS\npipelinewatch-jobs"];
+  lambda [label="AWS Lambda\nSQS worker"];
+  dynamo [label="DynamoDB\njob state + status index"];
+  dlq [label="Amazon SQS DLQ"];
+  cw [label="CloudWatch\nlogs + custom metrics + dashboard"];
+  alarms [label="CloudWatch Alarms"];
+  sns [label="SNS\noptional email alert"];
+
+  {rank=same; sqs; lambda; dynamo}
+  {rank=same; dlq; cw}
+
+  client -> api [label="HTTP"];
+  api -> sqs [label="enqueue"];
+  api -> dynamo [label="persist"];
+  sqs -> lambda [label="event source"];
+  lambda -> dynamo [label="update status"];
+  lambda -> cw [label="JSON logs + metrics"];
+  lambda -> sqs [label="partial batch failure", style=dashed];
+  sqs -> dlq [label="redrive after retries"];
+  dlq -> alarms [label="depth >= 1"];
+  cw -> alarms [label="Lambda errors"];
+  alarms -> sns [label="notify"];
+}
