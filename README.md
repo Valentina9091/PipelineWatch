@@ -1,7 +1,5 @@
 # PipelineWatch
 
-[![CI](https://github.com/Valentina9091/PipelineWatch/actions/workflows/ci.yml/badge.svg)](https://github.com/Valentina9091/PipelineWatch/actions/workflows/ci.yml)
-
 PipelineWatch is a cloud-native observability and recovery service for data-pipeline jobs. It tracks job state, processing failures, retries, dead-letter events, and pipeline health while demonstrating production-oriented AWS patterns: SQS redrive, Lambda partial batch failures, DynamoDB access patterns, least-privilege IAM, CloudWatch metrics/alarms, structured logs, and Terraform-managed infrastructure.
 
 ![PipelineWatch architecture](architecture/pipelinewatch-phase3.svg)
